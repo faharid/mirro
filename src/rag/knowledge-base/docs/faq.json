@@ -1,0 +1,18 @@
+[
+  {
+    "question": "What LLM providers are supported?",
+    "answer": "OpenAI (GPT-4), Anthropic (Claude), and Google (Gemini) are supported through a unified interface."
+  },
+  {
+    "question": "How do I add documents to the knowledge base?",
+    "answer": "Use POST /api/knowledge/upload or POST /api/knowledge/ingest to process and embed documents."
+  },
+  {
+    "question": "How does memory work?",
+    "answer": "Conversations are stored in PostgreSQL. Semantic search over past messages uses pgvector embeddings."
+  },
+  {
+    "question": "Can I use voice output?",
+    "answer": "Yes. POST /api/voice/synthesize converts text to speech using ElevenLabs, Deepgram, or Google Cloud TTS."
+  }
+]

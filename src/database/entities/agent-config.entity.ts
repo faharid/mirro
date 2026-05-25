@@ -14,8 +14,11 @@ export class AgentConfigEntity {
   @Column({ unique: true })
   name!: string;
 
-  @Column()
+  @Column({ default: 'custom' })
   type!: string;
+
+  @Column({ name: 'clone_id', nullable: true })
+  cloneId?: string;
 
   @Column({ name: 'system_prompt', type: 'text' })
   systemPrompt!: string;

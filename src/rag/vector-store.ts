@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DocumentChunk } from './document-processor';
+import { EmbeddingService } from './embedding.service';
 
 export interface VectorSearchResult {
   id: string;
@@ -13,16 +14,43 @@ export interface VectorSearchResult {
 
 @Injectable()
 export class VectorStore {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly embeddingService: EmbeddingService,
+  ) {}
+
+  async hasContentHash(contentHash: string): Promise<boolean> {
+    const rows = await this.dataSource.query(
+      `SELECT id FROM knowledge_items
+       WHERE metadata->>'contentHash' = $1
+       LIMIT 1`,
+      [contentHash],
+    );
+    return rows.length > 0;
+  }
 
   async insertChunks(
     chunks: DocumentChunk[],
     embeddings: number[][],
-  ): Promise<void> {
+  ): Promise<{ inserted: number; skipped: number }> {
+    let inserted = 0;
+    let skipped = 0;
+
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const embedding = embeddings[i];
+      const contentHash = this.embeddingService.hashText(chunk.text);
+
+      if (await this.hasContentHash(contentHash)) {
+        skipped++;
+        continue;
+      }
+
       const vectorStr = `[${embedding.join(',')}]`;
+      const metadata = {
+        ...(chunk.metadata || {}),
+        contentHash,
+      };
 
       await this.dataSource.query(
         `INSERT INTO knowledge_items (content, source, metadata, embedding)
@@ -30,11 +58,14 @@ export class VectorStore {
         [
           chunk.text,
           chunk.source,
-          JSON.stringify(chunk.metadata || {}),
+          JSON.stringify(metadata),
           vectorStr,
         ],
       );
+      inserted++;
     }
+
+    return { inserted, skipped };
   }
 
   async search(

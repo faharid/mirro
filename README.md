@@ -17,7 +17,7 @@ Production patterns for AI agents and clones. Everything you need to build intel
 ```bash
 # Clone
 git clone https://github.com/faharid/ai-clone-kit
-cd ai-clone-kit
+cd mirro
 
 # Install
 npm install
@@ -36,6 +36,65 @@ npm run dev
 
 # API: http://localhost:3001
 ```
+
+## Web UI
+
+Full Next.js interface in [`web/`](web/) (chat, agents, knowledge base, voice, settings).
+
+```bash
+# Terminal 1 — API (from project root)
+docker compose up -d
+npm run migration:run   # first time only
+npm run dev             # http://localhost:3001/api
+
+# Terminal 2 — Frontend
+cd web
+cp .env.local.example .env.local   # optional
+npm install
+npm run dev             # http://localhost:3000
+```
+
+Or run both from the project root:
+
+```bash
+npm run dev:all
+```
+
+The dev server proxies `/api/*` to the Nest backend. Open **http://localhost:3000** for the UI (English).
+
+| Page | Route | Features |
+|------|-------|----------|
+| Chat | `/chat` | All agents + clones, API conversation list, sync/async, escalation banner, mic + TTS |
+| Clones | `/clones` | Persona wizard: questionnaire, documents, interview, mirror card, activate |
+| Agents | `/agents` | Built-in + custom CRUD, clone agents, start chat |
+| Knowledge | `/knowledge` | Search, upload, ingest (embedding dedup) |
+| Settings | `/settings` | User ID, token usage, API URL, sync mode, TTS provider |
+
+## Persona Clones / Mirror Card
+
+Create a digital persona from three inputs:
+
+1. **Questionnaire** — structured profile (tone, values, phrases, boundaries)
+2. **Documents** — upload `.txt`/`.md`; LLM extracts personality insights
+3. **Interview** — multi-turn interviewer agent until `[INTERVIEW_COMPLETE]`
+
+**Generate mirror card** fuses all sources into JSON (`identity`, `personality`, `speechPatterns`, `knowledge`, `systemPrompt`). **Activate** creates an `agent_config` and chat via `agentId: clone-{uuid}`.
+
+### Clone API
+
+| Method | Route | Description |
+|--------|------|-------------|
+| POST | `/api/clones` | Create draft `{ displayName, userId }` |
+| GET | `/api/clones?userId=` | List clones |
+| GET | `/api/clones/:id` | Status + partial mirror card |
+| PATCH | `/api/clones/:id/questionnaire` | Save answers |
+| POST | `/api/clones/:id/documents` | Upload file → insights |
+| POST | `/api/clones/:id/interview` | Interview turn |
+| POST | `/api/clones/:id/generate-mirror-card` | Synthesize mirror card |
+| POST | `/api/clones/:id/activate` | Create agent + status `active` |
+| DELETE | `/api/clones/:id` | Remove clone |
+
+Run migration `002` before using clones: `npm run migration:run`.
 
 ## Architecture
 
@@ -101,18 +160,29 @@ ai-clone-kit/
 │   │           ├── markdown.loader.ts
 │   │           └── web.loader.ts
 │   │
+│   ├── clones/                          # Persona clones + mirror card
+│   │   ├── clones.service.ts
+│   │   ├── mirror-card.service.ts
+│   │   ├── clone-interview.service.ts
+│   │   └── clone-document.service.ts
+│   ├── cache/
+│   │   ├── llm-cache.service.ts
+│   │   └── token-usage.service.ts
 │   ├── agents/
 │   │   ├── agents.module.ts
+│   │   ├── agent.factory.ts             # Built-in, custom, clone-* agents
+│   │   ├── dynamic-agent.ts
 │   │   ├── agent.interface.ts           # Agent contract
 │   │   ├── base-agent.ts                # Abstract base agent
 │   │   ├── assistant-agent.ts           # Personal assistant
 │   │   ├── support-agent.ts             # Customer support
 │   │   ├── domain-agent.ts              # Domain-specific expert
 │   │   ├── tools/
-│   │   │   ├── web-search.tool.ts       # Google/Bing search
-│   │   │   ├── calculator.tool.ts       # Basic math
-│   │   │   ├── database.tool.ts         # Query DB
-│   │   │   └── http.tool.ts             # Call APIs
+│   │   │   ├── tool-executor.ts         # calculate, search, http, database, memory
+│   │   │   ├── web-search.tool.ts
+│   │   │   ├── calculator.tool.ts
+│   │   │   ├── database.tool.ts
+│   │   │   └── http.tool.ts
 │   │   └── system-prompts/
 │   │       ├── assistant.prompt
 │   │       ├── support.prompt
@@ -517,33 +587,20 @@ npm run test:e2e
 # - Multi-agent coordination
 ```
 
-## Production Considerations
+## Production (implemented vs roadmap)
 
-- **Rate Limiting:** Built-in per user/agent
-- **Caching:** LLM responses cached by embedding
-- **Monitoring:** Request/response logging + metrics
-- **Error Handling:** Fallback models, retry logic
-- **Cost Control:** Token counting + budget limits
-- **Privacy:** User data encrypted at rest
-
-## Files to Create with Cursor
-
-```
-ai-clone-kit/
-├── src/llm/llm.service.ts
-├── src/llm/providers/openai.provider.ts
-├── src/rag/rag.service.ts
-├── src/agents/base-agent.ts
-├── src/agents/assistant-agent.ts
-├── src/memory/memory.service.ts
-├── src/voice/tts.service.ts
-├── src/queue/queue.service.ts
-├── src/api/chat.controller.ts
-├── src/database/entities/conversation.entity.ts
-├── examples/01-personal-assistant.ts
-├── examples/02-support-bot.ts
-└── README.md (this file)
-```
+| Feature | Status |
+|---------|--------|
+| Per-user rate limiting (`UserThrottlerGuard`, `X-User-Id`) | Implemented |
+| LLM response cache (Redis + Postgres `llm_response_cache`) | Implemented |
+| HTTP request logging (`LoggingInterceptor`) | Implemented |
+| Token usage tracking (`user_token_usage`, `GET /api/usage`) | Implemented |
+| Embedding dedup on ingest (`contentHash` in metadata) | Implemented |
+| Fallback LLM provider + retries | Implemented |
+| Auto memory summarize (≥6 user messages → BullMQ) | Implemented |
+| Datadog SDK | Roadmap |
+| Encryption at-rest for user data | Roadmap |
+| Streaming TTS (`Accept: audio/stream`) | Roadmap (batch TTS works) |
 
 ## Next Steps
 

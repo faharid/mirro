@@ -1,21 +1,25 @@
-import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Injectable, Optional } from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ConversationStore } from './conversation-store';
 import { ContextManager } from './context-manager';
 import { EmbeddingService } from '../rag/embedding.service';
 import { MemoryEntry, UserSummary } from './types/memory';
 import { MessageEntity } from '../database/entities/message.entity';
+import { UserSummaryEntity } from '../database/entities/user-summary.entity';
+import { ConversationEntity } from '../database/entities/conversation.entity';
+import { QueueService } from '../queue/queue.service';
 
 @Injectable()
 export class MemoryService {
-  private summaries = new Map<string, UserSummary>();
-
   constructor(
     private readonly conversationStore: ConversationStore,
     private readonly contextManager: ContextManager,
     private readonly embeddingService: EmbeddingService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    @InjectRepository(UserSummaryEntity)
+    private readonly summaryRepo: Repository<UserSummaryEntity>,
+    @Optional() private readonly queueService?: QueueService,
   ) {}
 
   async getHistory(
@@ -69,25 +73,30 @@ export class MemoryService {
     }
   }
 
-  getSummary(userId: string): UserSummary | null {
-    return this.summaries.get(userId) || null;
+  async getSummary(userId: string): Promise<UserSummary | null> {
+    const row = await this.summaryRepo.findOne({ where: { userId } });
+    if (!row) return null;
+    return { userId: row.userId, summary: row.summary, updatedAt: row.updatedAt };
   }
 
-  setSummary(userId: string, summary: string): void {
-    this.summaries.set(userId, {
+  async setSummary(userId: string, summary: string): Promise<void> {
+    await this.summaryRepo.save({
       userId,
       summary,
       updatedAt: new Date(),
     });
   }
 
-  async getUserMemory(userId: string): Promise<{
+  async getUserMemory(userId: string, agentId?: string): Promise<{
     history: MessageEntity[];
     summary: UserSummary | null;
     similar: Array<{ content: string; role: string; score: number }>;
   }> {
-    const history = await this.getHistory(userId, { limit: 10 });
-    const summary = this.getSummary(userId);
+    const history = await this.getHistory(userId, {
+      limit: 10,
+      agentId: agentId || 'assistant',
+    });
+    const summary = await this.getSummary(userId);
     const lastUserMsg = history.find((m) => m.role === 'user');
     const similar = lastUserMsg
       ? await this.getSimilar(lastUserMsg.content, { userId, limit: 5 })
@@ -96,7 +105,9 @@ export class MemoryService {
     return { history, summary, similar };
   }
 
-  async save(entry: MemoryEntry & { agentId?: string }): Promise<void> {
+  async save(
+    entry: MemoryEntry & { agentId?: string },
+  ): Promise<{ conversationId: string }> {
     const conversation = await this.conversationStore.getOrCreateConversation(
       entry.userId,
       entry.agentId || 'assistant',
@@ -110,7 +121,7 @@ export class MemoryService {
         entry.assistantResponse,
       );
     } catch {
-      // embeddings optional without API key
+      // embeddings optional
     }
 
     await this.conversationStore.addMessage(
@@ -127,13 +138,43 @@ export class MemoryService {
       { timestamp: entry.timestamp },
       assistantEmbedding,
     );
+
+    const userMsgCount = await this.conversationStore.countUserMessages(
+      conversation.id,
+    );
+    if (userMsgCount >= 6 && this.queueService) {
+      await this.queueService.addAsyncAction({
+        type: 'summarize_memory',
+        userId: entry.userId,
+      });
+    }
+
+    return { conversationId: conversation.id };
   }
 
   async getConversation(id: string) {
     return this.conversationStore.getConversation(id);
   }
 
+  async listConversations(
+    userId: string,
+    agentId?: string,
+  ): Promise<ConversationEntity[]> {
+    return this.conversationStore.listByUser(userId, agentId);
+  }
+
   async clearConversation(id: string): Promise<void> {
     await this.conversationStore.deleteConversation(id);
+  }
+
+  async getOrCreateConversationId(
+    userId: string,
+    agentId: string,
+  ): Promise<string> {
+    const c = await this.conversationStore.getOrCreateConversation(
+      userId,
+      agentId,
+    );
+    return c.id;
   }
 }

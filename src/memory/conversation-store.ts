@@ -69,4 +69,21 @@ export class ConversationStore {
   async deleteConversation(id: string): Promise<void> {
     await this.conversationRepo.delete({ id });
   }
+
+  async listByUser(
+    userId: string,
+    agentId?: string,
+  ): Promise<ConversationEntity[]> {
+    return this.conversationRepo.find({
+      where: agentId ? { userId, agentId } : { userId },
+      order: { updatedAt: 'DESC' },
+      take: 50,
+    });
+  }
+
+  async countUserMessages(conversationId: string): Promise<number> {
+    return this.messageRepo.count({
+      where: { conversationId, role: 'user' },
+    });
+  }
 }

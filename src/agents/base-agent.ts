@@ -5,10 +5,9 @@ import { LlmService } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { RagService } from '../rag/rag.service';
 import { ContextManager } from '../memory/context-manager';
-import { AgentConfig, IAgent } from './agent.interface';
+import { AgentConfig, AgentHandleResult, IAgent } from './agent.interface';
 import { ToolDefinition } from '../llm/types/tool';
-import { executeCalculator } from './tools/calculator.tool';
-import { executeWebSearch } from './tools/web-search.tool';
+import { ToolExecutor } from './tools/tool-executor';
 
 export const KNOWLEDGE_KEYWORDS = [
   'what', 'how', 'why', 'when', 'where', 'explain', 'documentation',
@@ -27,6 +26,7 @@ export abstract class BaseAgent implements IAgent {
     protected readonly memoryService: MemoryService,
     protected readonly ragService: RagService,
     protected readonly contextManager: ContextManager,
+    protected readonly toolExecutor: ToolExecutor,
     protected readonly config: ConfigService,
   ) {}
 
@@ -44,8 +44,11 @@ export abstract class BaseAgent implements IAgent {
     return KNOWLEDGE_KEYWORDS.some((kw) => lower.includes(kw));
   }
 
-  async handle(message: string, userId: string): Promise<string> {
-    const memory = await this.memoryService.getUserMemory(userId);
+  async handle(
+    message: string,
+    userId: string,
+  ): Promise<string | AgentHandleResult> {
+    const memory = await this.memoryService.getUserMemory(userId, this.id);
     let ragContext = '';
 
     if (this.useRagByDefault && this.isKnowledgeQuestion(message)) {
@@ -53,7 +56,7 @@ export abstract class BaseAgent implements IAgent {
         const docs = await this.ragService.retrieve(message, { topK: 5 });
         ragContext = docs.map((d) => d.text).join('\n\n');
       } catch {
-        // RAG optional without embeddings
+        // RAG optional
       }
     }
 
@@ -85,39 +88,29 @@ export abstract class BaseAgent implements IAgent {
       tools: this.tools,
       provider: this.config.get('llm.defaultProvider'),
       model: this.config.get('llm.defaultModel'),
+      userId,
     });
 
     let finalText = response.text;
 
     if (response.toolCalls?.length) {
-      const toolResults: string[] = [];
-      for (const call of response.toolCalls) {
-        if (call.name === 'calculate') {
-          const expr = String(call.arguments.expression || '');
-          const result = executeCalculator(expr);
-          toolResults.push(`Calculator: ${JSON.stringify(result)}`);
-        } else if (call.name === 'search') {
-          const query = String(call.arguments.query || message);
-          const results = await executeWebSearch(
-            query,
-            process.env.SERPAPI_KEY,
-          );
-          toolResults.push(`Search: ${JSON.stringify(results)}`);
-        }
-      }
-      if (toolResults.length) {
-        const followUp = await this.llmService.chat({
-          messages: [
-            ...messages,
-            { role: 'assistant', content: response.text },
-            {
-              role: 'user',
-              content: `Tool results:\n${toolResults.join('\n')}\nProvide final answer.`,
-            },
-          ],
-        });
-        finalText = followUp.text;
-      }
+      const toolResults = await this.toolExecutor.executeAll(
+        response.toolCalls,
+        { userId, userMessage: message },
+      );
+      const followUp = await this.llmService.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: response.text },
+          {
+            role: 'user',
+            content: `Tool results:\n${toolResults.join('\n')}\nProvide final answer.`,
+          },
+        ],
+        userId,
+        skipCache: true,
+      });
+      finalText = followUp.text;
     }
 
     await this.memoryService.save({
@@ -128,6 +121,15 @@ export abstract class BaseAgent implements IAgent {
       agentId: this.id,
     });
 
+    const shouldEscalate =
+      this.id === 'support' &&
+      /escalat|human agent|speak to someone|refund over|legal matter/i.test(
+        message + finalText,
+      );
+
+    if (shouldEscalate) {
+      return { text: finalText, shouldEscalate: true };
+    }
     return finalText;
   }
 

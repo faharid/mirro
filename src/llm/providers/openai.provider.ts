@@ -48,10 +48,8 @@ export class OpenaiProvider extends BaseLlmProvider {
     const toolCalls = choice.message.tool_calls?.map((tc) => ({
       id: tc.id,
       name: tc.function.name,
-      arguments: JSON.parse(tc.function.arguments || '{}') as Record<
-        string,
-        unknown
-      >,
+      arguments: (JSON.parse(tc.function.arguments || '{}') ??
+        {}) as Record<string, unknown>,
     }));
 
     return {

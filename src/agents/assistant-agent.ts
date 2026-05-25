@@ -6,6 +6,7 @@ import { MemoryService } from '../memory/memory.service';
 import { RagService } from '../rag/rag.service';
 import { ContextManager } from '../memory/context-manager';
 import { ToolDefinition } from '../llm/types/tool';
+import { ToolExecutor } from './tools/tool-executor';
 
 @Injectable()
 export class AssistantAgent extends BaseAgent {
@@ -15,6 +16,8 @@ export class AssistantAgent extends BaseAgent {
     { name: 'search', description: 'Search the web for information' },
     { name: 'calculate', description: 'Perform mathematical calculations' },
     { name: 'memory', description: 'Recall past conversations' },
+    { name: 'http', description: 'Call an HTTP API' },
+    { name: 'database', description: 'Query allowed database tables' },
   ];
 
   constructor(
@@ -22,8 +25,16 @@ export class AssistantAgent extends BaseAgent {
     memoryService: MemoryService,
     ragService: RagService,
     contextManager: ContextManager,
+    toolExecutor: ToolExecutor,
     config: ConfigService,
   ) {
-    super(llmService, memoryService, ragService, contextManager, config);
+    super(
+      llmService,
+      memoryService,
+      ragService,
+      contextManager,
+      toolExecutor,
+      config,
+    );
   }
 }

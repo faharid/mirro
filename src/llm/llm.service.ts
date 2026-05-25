@@ -12,6 +12,8 @@ import {
   DEFAULT_MODELS,
   LlmProviderName,
 } from './config/models.config';
+import { LlmCacheService } from '../cache/llm-cache.service';
+import { TokenUsageService } from '../cache/token-usage.service';
 
 export interface LlmChatRequest {
   provider?: LlmProviderName;
@@ -20,12 +22,16 @@ export interface LlmChatRequest {
   temperature?: number;
   maxTokens?: number;
   tools?: ToolDefinition[];
+  userId?: string;
+  tokenBudget?: number;
+  skipCache?: boolean;
 }
 
 @Injectable()
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly providers: Map<LlmProviderName, BaseLlmProvider>;
+  private readonly cacheEnabled: boolean;
 
   constructor(
     private readonly config: ConfigService,
@@ -33,6 +39,8 @@ export class LlmService {
     anthropic: AnthropicProvider,
     google: GoogleProvider,
     groq: GroqProvider,
+    private readonly llmCache: LlmCacheService,
+    private readonly tokenUsage: TokenUsageService,
   ) {
     this.providers = new Map<LlmProviderName, BaseLlmProvider>([
       ['openai', openai],
@@ -40,6 +48,7 @@ export class LlmService {
       ['google', google],
       ['groq', groq],
     ]);
+    this.cacheEnabled = this.config.get('LLM_CACHE_ENABLED') !== 'false';
   }
 
   async chat(request: LlmChatRequest): Promise<ChatResponse> {
@@ -51,8 +60,17 @@ export class LlmService {
       this.config.get<string>('llm.defaultModel') ||
       DEFAULT_MODELS[provider];
 
+    if (this.cacheEnabled && !request.skipCache && !request.tools?.length) {
+      const hash = this.llmCache.hashRequest(request);
+      const cached = await this.llmCache.get(hash);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    let response: ChatResponse;
     try {
-      return await this.chatWithProvider(provider, model, request);
+      response = await this.chatWithProvider(provider, model, request);
     } catch (primaryError) {
       this.logger.warn(
         `Primary provider ${provider} failed: ${(primaryError as Error).message}`,
@@ -68,12 +86,30 @@ export class LlmService {
         throw primaryError;
       }
 
-      return this.chatWithProvider(
+      response = await this.chatWithProvider(
         fallbackProvider,
         fallbackModel,
         request,
       );
     }
+
+    if (request.userId && response.usage) {
+      await this.tokenUsage.recordUsage(
+        request.userId,
+        response.usage,
+        request.tokenBudget?.toString(),
+      );
+    }
+
+    if (this.cacheEnabled && !request.skipCache && !request.tools?.length) {
+      const hash = this.llmCache.hashRequest(request);
+      await this.llmCache.set(hash, response, {
+        provider: response.provider,
+        model: response.model,
+      });
+    }
+
+    return response;
   }
 
   private async chatWithProvider(

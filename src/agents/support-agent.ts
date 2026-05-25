@@ -6,6 +6,7 @@ import { MemoryService } from '../memory/memory.service';
 import { RagService } from '../rag/rag.service';
 import { ContextManager } from '../memory/context-manager';
 import { ToolDefinition } from '../llm/types/tool';
+import { ToolExecutor } from './tools/tool-executor';
 
 @Injectable()
 export class SupportAgent extends BaseAgent {
@@ -21,9 +22,17 @@ export class SupportAgent extends BaseAgent {
     memoryService: MemoryService,
     ragService: RagService,
     contextManager: ContextManager,
+    toolExecutor: ToolExecutor,
     config: ConfigService,
   ) {
-    super(llmService, memoryService, ragService, contextManager, config);
+    super(
+      llmService,
+      memoryService,
+      ragService,
+      contextManager,
+      toolExecutor,
+      config,
+    );
   }
 
   isKnowledgeQuestion(message: string): boolean {

@@ -1,5 +1,6 @@
 import { Client } from 'pg';
 import { migration001 } from './migrations/001-initial';
+import { migration002 } from './migrations/002-clones-and-production';
 
 async function run() {
   const connectionString =
@@ -11,6 +12,8 @@ async function run() {
   try {
     await client.query(migration001);
     console.log('Migration 001 completed successfully.');
+    await client.query(migration002);
+    console.log('Migration 002 completed successfully.');
   } finally {
     await client.end();
   }

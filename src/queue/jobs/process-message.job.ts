@@ -11,4 +11,6 @@ export interface ProcessMessageJobResult {
   response: string;
   agentId: string;
   userId: string;
+  conversationId?: string;
+  shouldEscalate?: boolean;
 }

@@ -82,6 +82,24 @@ export class RagService {
     }
   }
 
+  async embedChunksWithStats(
+    chunks: ReturnType<DocumentProcessor['chunkDocuments']>,
+  ): Promise<{ inserted: number; skipped: number }> {
+    let inserted = 0;
+    let skipped = 0;
+    const batchSize = 20;
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const batch = chunks.slice(i, i + batchSize);
+      const embeddings = await this.embeddingService.embedBatch(
+        batch.map((c) => c.text),
+      );
+      const stats = await this.vectorStore.insertChunks(batch, embeddings);
+      inserted += stats.inserted;
+      skipped += stats.skipped;
+    }
+    return { inserted, skipped };
+  }
+
   async retrieve(
     query: string,
     options?: { topK?: number; minScore?: number },

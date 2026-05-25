@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -23,16 +24,16 @@ export class AgentsController {
   ) {}
 
   @Get()
-  list() {
-    const builtIn = this.agentFactory.list();
-    return { agents: builtIn };
+  async list(@Query('userId') userId?: string) {
+    const agents = await this.agentFactory.list(userId);
+    return { agents };
   }
 
   @Post()
   async create(@Body() dto: CreateAgentDto) {
     const agent = this.agentRepo.create({
       name: dto.name,
-      type: dto.type,
+      type: dto.type || 'custom',
       systemPrompt: dto.systemPrompt,
       tools: dto.tools || [],
       model: dto.model || 'gpt-4o-mini',
@@ -44,10 +45,12 @@ export class AgentsController {
   @Get(':id')
   async get(@Param('id') id: string) {
     try {
-      const builtIn = this.agentFactory.create(id);
+      const builtIn = await this.agentFactory.create(id);
       return builtIn.getConfig();
     } catch {
-      const custom = await this.agentRepo.findOne({ where: { id } });
+      const custom = await this.agentRepo.findOne({
+        where: [{ id }, { name: id }],
+      });
       if (!custom) {
         throw new NotFoundException(`Agent not found: ${id}`);
       }

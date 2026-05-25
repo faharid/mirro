@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AgentsModule } from '../agents/agents.module';
@@ -27,7 +27,7 @@ import { ASYNC_ACTIONS_QUEUE } from './jobs/async-actions.job';
       { name: ASYNC_ACTIONS_QUEUE },
     ),
     AgentsModule,
-    MemoryModule,
+    forwardRef(() => MemoryModule),
     RagModule,
     LlmModule,
   ],

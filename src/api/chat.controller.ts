@@ -12,6 +12,16 @@ import { AgentFactory } from '../agents/agent.factory';
 import { QueueService } from '../queue/queue.service';
 import { MemoryService } from '../memory/memory.service';
 import { ChatDto } from './dto/chat.dto';
+import { AgentHandleResult } from '../agents/agent.interface';
+
+function normalizeResponse(
+  result: string | AgentHandleResult,
+): { response: string; shouldEscalate?: boolean } {
+  if (typeof result === 'string') {
+    return { response: result };
+  }
+  return { response: result.text, shouldEscalate: result.shouldEscalate };
+}
 
 @Controller()
 export class ChatController {
@@ -21,6 +31,14 @@ export class ChatController {
     private readonly memoryService: MemoryService,
   ) {}
 
+  @Get('conversations')
+  listConversations(
+    @Query('userId') userId: string,
+    @Query('agentId') agentId?: string,
+  ) {
+    return this.memoryService.listConversations(userId || 'anonymous', agentId);
+  }
+
   @Post('chat')
   async chat(
     @Body() dto: ChatDto,
@@ -29,10 +47,23 @@ export class ChatController {
     const agentId = dto.agentId || 'assistant';
     const userId = dto.userId || 'anonymous';
 
+    const conversationId = await this.memoryService.getOrCreateConversationId(
+      userId,
+      agentId,
+    );
+
     if (sync === 'true') {
-      const agent = this.agentFactory.create(agentId);
-      const response = await agent.handle(dto.message, userId);
-      return { response, agentId, userId, sync: true };
+      const agent = await this.agentFactory.create(agentId);
+      const raw = await agent.handle(dto.message, userId);
+      const { response, shouldEscalate } = normalizeResponse(raw);
+      return {
+        response,
+        agentId,
+        userId,
+        conversationId,
+        sync: true,
+        shouldEscalate,
+      };
     }
 
     const { jobId } = await this.queueService.addProcessMessage({
@@ -41,7 +72,7 @@ export class ChatController {
       agentId,
     });
 
-    return { jobId, status: 'queued', agentId, userId };
+    return { jobId, status: 'queued', agentId, userId, conversationId };
   }
 
   @Get('chat/jobs/:jobId')

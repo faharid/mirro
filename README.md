@@ -1,6 +1,19 @@
-# ai-clone-kit (mirro)
+<div align="center">
+  
+# Mirro
 
-> Build AI clones and voice agents fast. LLM orchestration + RAG + memory + persona cloning (mirror card).
+<img width="150" height="150" alt="mirro_logo" src="https://github.com/user-attachments/assets/b7f6d348-cefc-455b-ad4e-318e4b062b92" />
+
+###  Build AI clones and voice agents fast.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Version](https://img.shields.io/badge/Version-1.0.0-blue)
+![Status: Stable](https://img.shields.io/badge/Status-Stable-green)
+![Docker Compose](https://img.shields.io/badge/Docker%20Compose-v2.24+-blue)
+![NestJS](https://img.shields.io/badge/NestJS-11-red)
+![React](https://img.shields.io/badge/React-19-61dafb)
+
+</div>
 
 ## Overview
 

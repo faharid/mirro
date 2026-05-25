@@ -1,618 +1,372 @@
-# ai-clone-kit
+# ai-clone-kit (mirro)
 
-> Build AI clones and voice agents fast. LLM orchestration + RAG + voice synthesis. Perfect for chatbots, customer support agents, or personal AI assistants.
+> Build AI clones and voice agents fast. LLM orchestration + RAG + memory + persona cloning (mirror card).
 
 ## Overview
 
-Production patterns for AI agents and clones. Everything you need to build intelligent systems:
-- **LLM Orchestration:** Multi-model support (OpenAI, Claude, Anthropic, Google, Groq)
-- **RAG (Retrieval-Augmented Generation):** Knowledge base + semantic search
-- **Memory Management:** Vector DB + conversation history
-- **Voice:** Text-to-speech integration (ElevenLabs/Deepgram)
-- **Job Queue:** Async task orchestration (BullMQ)
-- **Examples:** Personal assistant, customer support bot, domain-specific agents
+Production-oriented patterns for AI agents and digital personas:
+
+| Area | What you get |
+|------|----------------|
+| **LLM** | OpenAI, Anthropic, Google, Groq — fallback + retries |
+| **RAG** | pgvector knowledge base, upload, ingest, deduplicated embeddings |
+| **Memory** | Conversation history, vector recall, Postgres user summaries, auto-summarize |
+| **Agents** | Built-in (assistant, support, domain), custom agents, **persona clones** |
+| **Tools** | `calculate`, `search`, `http`, `database`, `memory` |
+| **Voice** | ElevenLabs, Deepgram, Google TTS + STT |
+| **Queue** | BullMQ async chat + background jobs |
+| **Web UI** | Next.js app: chat, clones wizard, agents CRUD, knowledge, settings |
+
+### Documentation
+
+**This README is enough to get started** — setup, env vars, API, clones, and production features are all here. A separate `/docs` folder is optional later (e.g. if you add deployment runbooks or ADRs); you do not need it for local dev.
+
+---
+
+## Prerequisites
+
+- **Node.js** 20+
+- **Docker** (Postgres pgvector on port **5433**, Redis on **6379**)
+- At least one **LLM API key** (OpenAI or Groq recommended for clones/embeddings)
+
+---
 
 ## Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/faharid/ai-clone-kit
 cd mirro
 
-# Install
+# Backend dependencies
 npm install
 
-# Configure
+# Infrastructure
+docker compose up -d
+
+# Environment (edit with your keys)
 cp .env.example .env
-# Add your LLM API keys (OpenAI, Claude, etc.)
 
-# Run examples
-npm run example:assistant       # Personal AI assistant
-npm run example:support        # Customer support chatbot
-npm run example:domain         # Domain-specific expert
+# Database (001 + 002: clones, cache, token usage)
+npm run migration:run
 
-# Start server
+# API — http://localhost:3001/api
 npm run dev
-
-# API: http://localhost:3001
 ```
 
-## Web UI
-
-Full Next.js interface in [`web/`](web/) (chat, agents, knowledge base, voice, settings).
+### Web UI
 
 ```bash
-# Terminal 1 — API (from project root)
-docker compose up -d
-npm run migration:run   # first time only
-npm run dev             # http://localhost:3001/api
-
-# Terminal 2 — Frontend
 cd web
-cp .env.local.example .env.local   # optional
 npm install
-npm run dev             # http://localhost:3000
+cp .env.local.example .env.local   # optional
+npm run dev                        # http://localhost:3000
 ```
 
-Or run both from the project root:
+From project root (API + web together):
 
 ```bash
 npm run dev:all
 ```
 
-The dev server proxies `/api/*` to the Nest backend. Open **http://localhost:3000** for the UI (English).
+The Next.js dev server proxies `/api/*` → `http://localhost:3001`. Open **http://localhost:3000**.
 
 | Page | Route | Features |
 |------|-------|----------|
-| Chat | `/chat` | All agents + clones, API conversation list, sync/async, escalation banner, mic + TTS |
-| Clones | `/clones` | Persona wizard: questionnaire, documents, interview, mirror card, activate |
-| Agents | `/agents` | Built-in + custom CRUD, clone agents, start chat |
-| Knowledge | `/knowledge` | Search, upload, ingest (embedding dedup) |
-| Settings | `/settings` | User ID, token usage, API URL, sync mode, TTS provider |
+| **Chat** | `/chat` | All agents + active clones, conversation sidebar, sync/async, support escalation banner, mic + TTS |
+| **Clones** | `/clones` | Wizard: questionnaire → documents → interview → mirror card → activate |
+| **Agents** | `/agents` | Built-in agents, custom agent CRUD, link to chat |
+| **Knowledge** | `/knowledge` | Semantic search, file upload, local ingest |
+| **Settings** | `/settings` | User ID, token usage, API URL, sync mode, TTS provider |
+
+### Examples (CLI)
+
+```bash
+npm run example:assistant
+npm run example:support
+npm run example:domain
+npm run example:voice
+npm run example:multi
+npm run example:tools
+```
+
+---
 
 ## Persona Clones / Mirror Card
 
-Create a digital persona from three inputs:
+Build a **digital persona** from three sources, then chat in character.
 
-1. **Questionnaire** — structured profile (tone, values, phrases, boundaries)
-2. **Documents** — upload `.txt`/`.md`; LLM extracts personality insights
-3. **Interview** — multi-turn interviewer agent until `[INTERVIEW_COMPLETE]`
+```mermaid
+flowchart LR
+  Q[Questionnaire] --> Draft[PersonaClone draft]
+  D[Documents] --> Draft
+  I[Interview] --> Draft
+  Draft --> Card[Mirror card JSON]
+  Card --> Agent[agent: clone-uuid]
+  Agent --> Chat[Chat API]
+```
 
-**Generate mirror card** fuses all sources into JSON (`identity`, `personality`, `speechPatterns`, `knowledge`, `systemPrompt`). **Activate** creates an `agent_config` and chat via `agentId: clone-{uuid}`.
+### UI flow (`/clones`)
+
+1. Create clone (display name)
+2. **Questionnaire** — tone, values, phrases, boundaries
+3. **Documents** — upload `.txt` / `.md` → LLM personality insights
+4. **Interview** — multi-turn interviewer until complete
+5. **Review** — generate mirror card (JSON)
+6. **Activate** → chat at `/chat?agent=clone-{id}`
+
+### Mirror card shape
+
+```json
+{
+  "identity": { "name", "archetype", "oneLineBio" },
+  "personality": { "traits", "values", "communicationStyle", "humor", "boundaries" },
+  "speechPatterns": { "vocabulary", "sentenceStyle", "samplePhrases" },
+  "knowledge": { "expertise", "opinions" },
+  "interviewHighlights": [],
+  "systemPrompt": "..."
+}
+```
 
 ### Clone API
 
 | Method | Route | Description |
 |--------|------|-------------|
-| POST | `/api/clones` | Create draft `{ displayName, userId }` |
-| GET | `/api/clones?userId=` | List clones |
-| GET | `/api/clones/:id` | Status + partial mirror card |
-| PATCH | `/api/clones/:id/questionnaire` | Save answers |
-| POST | `/api/clones/:id/documents` | Upload file → insights |
-| POST | `/api/clones/:id/interview` | Interview turn |
-| POST | `/api/clones/:id/generate-mirror-card` | Synthesize mirror card |
-| POST | `/api/clones/:id/activate` | Create agent + status `active` |
-| DELETE | `/api/clones/:id` | Remove clone |
+| `POST` | `/api/clones` | Create draft `{ displayName, userId? }` |
+| `GET` | `/api/clones?userId=` | List clones for user |
+| `GET` | `/api/clones/:id` | Status + questionnaire / mirror card |
+| `PATCH` | `/api/clones/:id/questionnaire` | Save `{ answers, userId? }` |
+| `POST` | `/api/clones/:id/documents` | Multipart `file` → insights |
+| `POST` | `/api/clones/:id/interview` | `{ message?, userId? }` → interviewer reply |
+| `POST` | `/api/clones/:id/generate-mirror-card` | LLM synthesis (Q + docs + interview) |
+| `POST` | `/api/clones/:id/activate` | Creates `agent_config`, status `active` |
+| `DELETE` | `/api/clones/:id?userId=` | Delete clone |
 
-Run migration `002` before using clones: `npm run migration:run`.
+Requires migration **002**: `npm run migration:run`.
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:3001/api`
+
+### Chat
+
+| Method | Route | Description |
+|--------|------|-------------|
+| `POST` | `/chat?sync=true` | Sync response (default in UI) |
+| `POST` | `/chat` | Async → `{ jobId, conversationId }` |
+| `GET` | `/chat/jobs/:jobId` | Poll async result |
+| `GET` | `/conversations?userId=&agentId=` | List conversations |
+| `GET` | `/conversations/:id` | Conversation + messages |
+| `DELETE` | `/conversations/:id` | Clear conversation |
+
+**Body (chat):**
+
+```json
+{
+  "agentId": "assistant",
+  "message": "Hello",
+  "userId": "your-user-uuid"
+}
+```
+
+**Agent IDs:** `assistant` | `support` | `domain` | custom agent `name` | `clone-{uuid}`
+
+**Response (sync):** `{ response, agentId, userId, conversationId, shouldEscalate? }`
+
+### Agents
+
+| Method | Route | Description |
+|--------|------|-------------|
+| `GET` | `/agents?userId=` | Built-in + custom + active clones |
+| `POST` | `/agents` | Create custom agent |
+| `GET` | `/agents/:id` | Config (built-in or DB) |
+| `PUT` | `/agents/:id` | Update custom agent |
+| `DELETE` | `/agents/:id` | Delete custom agent |
+
+### Knowledge
+
+| Method | Route | Description |
+|--------|------|-------------|
+| `GET` | `/knowledge/search?q=&topK=` | Semantic search |
+| `POST` | `/knowledge/upload` | Upload file (multipart) |
+| `POST` | `/knowledge/ingest` | Ingest local docs path |
+
+### Voice
+
+| Method | Route | Description |
+|--------|------|-------------|
+| `POST` | `/voice/synthesize` | TTS → audio blob |
+| `POST` | `/voice/transcribe` | STT (multipart audio) |
+
+### Usage
+
+| Method | Route | Description |
+|--------|------|-------------|
+| `GET` | `/usage?userId=` | Accumulated token count |
+
+### Tools (assistant agent)
+
+| Tool | Purpose |
+|------|---------|
+| `calculate` | Safe math expressions |
+| `search` | Web search (needs `SERPAPI_KEY`) |
+| `http` | HTTP GET/POST to allowed URLs |
+| `database` | Read-only queries on allowlisted tables |
+| `memory` | Similar messages + recent history for user |
+
+---
 
 ## Architecture
 
 ```
-Input (User message / Voice)
+User (Web / API / Voice)
     ↓
-Conversation Handler
-    ├─ Memory retrieval (vector DB)
-    ├─ Context enrichment
-    └─ RAG retrieval if needed
+ChatController / ClonesController
     ↓
-LLM Agent
-    ├─ Choose model (GPT-4, Claude, etc.)
-    ├─ System prompt
-    ├─ Tool calling (if configured)
-    └─ Generate response
+AgentFactory → Assistant | Support | Domain | DynamicAgent | Clone
+    ├─ MemoryService (Postgres + pgvector)
+    ├─ RagService (optional context)
+    ├─ ToolExecutor
+    └─ LlmService (cache, fallback, token usage)
     ↓
-Post-processing
-    ├─ Memory storage
-    ├─ Voice synthesis (optional)
-    └─ Response formatting
-    ↓
-Output (Text / Voice / Webhook)
+Queue (BullMQ) optional async path
 ```
+
+---
 
 ## Directory Structure
 
 ```
-ai-clone-kit/
+mirro/
 ├── src/
-│   ├── main.ts                          # Entry point
-│   ├── app.module.ts                    # Root module
-│   │
-│   ├── llm/
-│   │   ├── llm.module.ts
-│   │   ├── llm.service.ts               # Main LLM client wrapper
-│   │   ├── providers/
-│   │   │   ├── openai.provider.ts       # OpenAI/GPT-4
-│   │   │   ├── anthropic.provider.ts    # Claude
-│   │   │   ├── google.provider.ts       # Gemini (optional)
-│   │   │   ├── groq.provider.ts         # Groq (Llama, Mixtral, fast inference)
-│   │   │   └── base.provider.ts         # Abstract base class
-│   │   ├── types/
-│   │   │   ├── message.ts
-│   │   │   ├── tool.ts
-│   │   │   └── response.ts
-│   │   └── config/
-│   │       └── models.config.ts
-│   │
-│   ├── rag/
-│   │   ├── rag.module.ts
-│   │   ├── rag.service.ts               # RAG orchestration
-│   │   ├── document-processor.ts        # Chunk documents
-│   │   ├── embedding.service.ts         # Generate embeddings
-│   │   ├── vector-store.ts              # pgvector/Pinecone wrapper
-│   │   ├── retriever.ts                 # Semantic search
-│   │   └── knowledge-base/
-│   │       ├── docs/
-│   │       │   ├── example-doc.md
-│   │       │   └── faq.json
-│   │       └── loaders/
-│   │           ├── pdf.loader.ts
-│   │           ├── markdown.loader.ts
-│   │           └── web.loader.ts
-│   │
-│   ├── clones/                          # Persona clones + mirror card
-│   │   ├── clones.service.ts
-│   │   ├── mirror-card.service.ts
-│   │   ├── clone-interview.service.ts
-│   │   └── clone-document.service.ts
-│   ├── cache/
-│   │   ├── llm-cache.service.ts
-│   │   └── token-usage.service.ts
-│   ├── agents/
-│   │   ├── agents.module.ts
-│   │   ├── agent.factory.ts             # Built-in, custom, clone-* agents
-│   │   ├── dynamic-agent.ts
-│   │   ├── agent.interface.ts           # Agent contract
-│   │   ├── base-agent.ts                # Abstract base agent
-│   │   ├── assistant-agent.ts           # Personal assistant
-│   │   ├── support-agent.ts             # Customer support
-│   │   ├── domain-agent.ts              # Domain-specific expert
-│   │   ├── tools/
-│   │   │   ├── tool-executor.ts         # calculate, search, http, database, memory
-│   │   │   ├── web-search.tool.ts
-│   │   │   ├── calculator.tool.ts
-│   │   │   ├── database.tool.ts
-│   │   │   └── http.tool.ts
-│   │   └── system-prompts/
-│   │       ├── assistant.prompt
-│   │       ├── support.prompt
-│   │       └── domain.prompt
-│   │
-│   ├── memory/
-│   │   ├── memory.module.ts
-│   │   ├── memory.service.ts            # Conversation + vector memory
-│   │   ├── conversation-store.ts        # Store conversations (DB)
-│   │   ├── context-manager.ts           # Build context for LLM
-│   │   └── types/
-│   │       ├── conversation.ts
-│   │       └── memory.ts
-│   │
-│   ├── voice/
-│   │   ├── voice.module.ts
-│   │   ├── tts.service.ts               # Text-to-speech
-│   │   ├── providers/
-│   │   │   ├── elevenlabs.provider.ts   # ElevenLabs
-│   │   │   ├── deepgram.provider.ts     # Deepgram
-│   │   │   └── google.provider.ts       # Google Cloud
-│   │   └── stt.service.ts               # Speech-to-text (optional)
-│   │
-│   ├── queue/
-│   │   ├── queue.module.ts
-│   │   ├── queue.service.ts             # BullMQ wrapper
-│   │   └── jobs/
-│   │       ├── process-message.job.ts   # Main processing job
-│   │       └── async-actions.job.ts     # Background tasks
-│   │
-│   ├── api/
-│   │   ├── chat.controller.ts           # Chat endpoint
-│   │   ├── agents.controller.ts         # Agent management
-│   │   ├── voice.controller.ts          # Voice input/output
-│   │   └── dto/
-│   │       ├── chat.dto.ts
-│   │       └── agent.dto.ts
-│   │
+│   ├── api/                 # chat, agents, clones, knowledge, voice, usage
+│   ├── agents/              # base, builtin, dynamic, tool-executor
+│   ├── clones/              # mirror card, interview, documents
+│   ├── cache/               # LLM cache, token usage
+│   ├── llm/                 # providers: openai, anthropic, google, groq
+│   ├── rag/                 # embeddings, vector-store, retriever
+│   ├── memory/              # conversations, summaries, context
+│   ├── voice/               # TTS / STT
+│   ├── queue/               # BullMQ processors
 │   ├── database/
-│   │   ├── database.module.ts
-│   │   ├── entities/
-│   │   │   ├── conversation.entity.ts
-│   │   │   ├── message.entity.ts
-│   │   │   ├── agent-config.entity.ts
-│   │   │   └── knowledge-item.entity.ts
-│   │   └── migrations/
-│   │       └── 001-initial.ts
-│   │
-│   └── config/
-│       ├── env.config.ts
-│       ├── llm.config.ts
-│       └── rag.config.ts
-│
-├── examples/
-│   ├── 01-personal-assistant.ts          # AI that learns about you
-│   ├── 02-support-bot.ts                 # Customer support chatbot
-│   ├── 03-domain-expert.ts               # Domain-specific knowledge bot
-│   ├── 04-voice-agent.ts                 # Voice input/output
-│   ├── 05-multi-agent.ts                 # Multiple specialized agents
-│   └── 06-tools-integration.ts           # Agents with external tools
-│
+│   │   ├── entities/        # conversations, clones, cache, usage, …
+│   │   └── migrations/      # 001-initial, 002-clones-and-production
+│   └── common/              # user throttler, logging interceptor
+├── web/                     # Next.js UI
+│   └── src/app/
+│       ├── chat/
+│       ├── clones/
+│       ├── agents/
+│       ├── knowledge/
+│       └── settings/
+├── examples/                # 01–06 CLI demos
 ├── tests/
 │   ├── llm.test.ts
 │   ├── rag.test.ts
 │   ├── agents.test.ts
-│   └── e2e.test.ts
-│
-├── docker-compose.yml                    # pgvector, redis
-├── package.json
+│   ├── clones.test.ts
+│   ├── tools.test.ts
+│   └── chat.e2e.test.ts
+├── docker-compose.yml       # postgres:5433, redis:6379
 ├── .env.example
-└── README.md (this file)
+└── README.md
 ```
 
-## Core Features Explained
-
-### 1. LLM Orchestration
-
-Support multiple models with unified interface:
-
-```typescript
-// llm/llm.service.ts
-const response = await this.llmService.chat({
-  provider: 'openai',        // or 'anthropic', 'google', 'groq'
-  model: 'gpt-4',
-  messages: [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userMessage }
-  ],
-  temperature: 0.7,
-  maxTokens: 1000,
-  tools: [
-    { name: 'search', description: 'Search the web' },
-    { name: 'calculate', description: 'Perform calculations' }
-  ]
-});
-
-// Response includes
-// - response.text (generated text)
-// - response.toolCalls (if model chose tools)
-// - response.usage (token counts)
-```
-
-### 2. RAG (Retrieval-Augmented Generation)
-
-Add knowledge without fine-tuning:
-
-```typescript
-// 1. Load documents
-const documents = await this.ragService.loadDocuments({
-  source: 'local',
-  path: './knowledge-base/docs'
-});
-
-// 2. Split into chunks
-const chunks = await this.ragService.chunkDocuments(documents, {
-  chunkSize: 500,
-  overlap: 100
-});
-
-// 3. Generate embeddings
-await this.ragService.embedChunks(chunks);
-
-// 4. Retrieve relevant context
-const context = await this.ragService.retrieve(userQuery, {
-  topK: 5,
-  minScore: 0.8
-});
-
-// 5. Add to LLM prompt
-const enrichedPrompt = `
-You are a helpful assistant. Use this context:
-${context.map(c => c.text).join('\n')}
-
-User question: ${userQuery}
-`;
-```
-
-### 3. Agent Framework
-
-Define agents with system prompts + tools:
-
-```typescript
-// agents/assistant-agent.ts
-export class AssistantAgent extends BaseAgent {
-  constructor(
-    private llmService: LLMService,
-    private memoryService: MemoryService,
-    private ragService: RAGService
-  ) {
-    super('assistant');
-  }
-
-  systemPrompt = `You are a helpful personal AI assistant.
-    You have access to:
-    - User's past conversations (memory)
-    - Knowledge base
-    - Web search
-    - Calculator
-    
-    Be conversational, helpful, and remember context.`;
-
-  tools = [
-    { name: 'search', description: 'Search the web' },
-    { name: 'memory', description: 'Recall past conversations' },
-    { name: 'calculate', description: 'Perform math' }
-  ];
-
-  async handle(message: string, userId: string): Promise<string> {
-    // 1. Get user memory
-    const memory = await this.memoryService.getUserMemory(userId);
-
-    // 2. Retrieve RAG context if needed
-    let context = '';
-    if (this.isKnowledgeQuestion(message)) {
-      const docs = await this.ragService.retrieve(message);
-      context = docs.map(d => d.text).join('\n');
-    }
-
-    // 3. Build prompt
-    const prompt = `${this.systemPrompt}
-      
-User memory:
-${JSON.stringify(memory, null, 2)}
-
-${context ? `Relevant knowledge:\n${context}` : ''}
-
-User: ${message}`;
-
-    // 4. Call LLM
-    const response = await this.llmService.chat({
-      provider: 'openai',
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }]
-    });
-
-    // 5. Store in memory
-    await this.memoryService.save({
-      userId,
-      userMessage: message,
-      assistantResponse: response.text,
-      timestamp: new Date()
-    });
-
-    return response.text;
-  }
-}
-```
-
-### 4. Memory Management
-
-Store conversation + vector memory:
-
-```typescript
-// memory/memory.service.ts
-// Vector memory: semantic search over conversations
-const recentContext = await this.memoryService.getSimilar(
-  userMessage,
-  { limit: 5 }
-);
-
-// Conversation history: last N messages
-const history = await this.memoryService.getHistory(userId, {
-  limit: 10
-});
-
-// Summary memory: extract facts about user
-const summary = await this.memoryService.getSummary(userId);
-```
-
-### 5. Voice Support
-
-Text-to-speech and speech-to-text:
-
-```typescript
-// voice/tts.service.ts
-const audioBuffer = await this.ttsService.synthesize({
-  text: 'Hello, how can I help?',
-  provider: 'elevenlabs',
-  voiceId: 'natural-female-001',
-  language: 'en'
-});
-
-// Send as audio file / stream
-res.contentType('audio/mpeg');
-res.send(audioBuffer);
-```
-
-### 6. Async Job Processing
-
-Handle long-running tasks with BullMQ:
-
-```typescript
-// queue/queue.service.ts
-// Add job to queue
-await this.queueService.add('process-message', {
-  userId,
-  message,
-  agentType: 'support'
-});
-
-// Worker processes async
-@Process('process-message')
-async handleMessage(job: Job<MessageJob>) {
-  const { userId, message, agentType } = job.data;
-  const agent = this.agentFactory.create(agentType);
-  const response = await agent.handle(message, userId);
-  // Store result, send webhook, etc.
-}
-```
-
-## API Endpoints
-
-### Chat (Main)
-- `POST /api/chat` - Send message to agent
-  ```json
-  { "agentId": "assistant", "message": "Hello!" }
-  ```
-- `GET /api/conversations/:id` - Get conversation history
-- `DELETE /api/conversations/:id` - Clear conversation
-
-### Agents
-- `GET /api/agents` - List available agents
-- `POST /api/agents` - Create custom agent
-- `GET /api/agents/:id` - Get agent config
-- `PUT /api/agents/:id` - Update agent
-- `DELETE /api/agents/:id` - Delete agent
-
-### Voice
-- `POST /api/voice/synthesize` - Text-to-speech
-  ```json
-  { "text": "Hello world", "voice": "natural-female" }
-  ```
-- `POST /api/voice/transcribe` - Speech-to-text (audio file upload)
-
-### Knowledge Base
-- `POST /api/knowledge/upload` - Upload document
-- `GET /api/knowledge/search` - Search knowledge base
-- `POST /api/knowledge/ingest` - Process and embed documents
-
-## Examples Included
-
-### 1. Personal Assistant
-```bash
-npm run example:assistant
-
-# Features:
-# - Remembers conversation history
-# - Learns user preferences
-# - Can search web and perform tasks
-```
-
-### 2. Customer Support Bot
-```bash
-npm run example:support
-
-# Features:
-# - Handles common questions from KB
-# - Escalates to humans when needed
-# - Tracks support tickets
-# - Multi-language support
-```
-
-### 3. Domain Expert
-```bash
-npm run example:domain
-
-# Features:
-# - Specialized knowledge (finance, legal, technical)
-# - Cites sources from knowledge base
-# - Structured outputs (JSON, tables)
-```
-
-### 4. Voice Agent
-```bash
-npm run example:voice
-
-# Features:
-# - Speech-to-text input
-# - Voice output responses
-# - Streaming audio
-```
-
-### 5. Multi-Agent System
-Multiple specialized agents working together:
-- Coordinator picks best agent
-- Agents can delegate to each other
-- Shared memory/context
+---
 
 ## Configuration
 
-### Environment Variables
+Copy `.env.example` → `.env`:
 
 ```bash
-# .env
-# LLM Providers
+# Server
+PORT=3001
+NODE_ENV=development
+
+# LLM (at least one required for chat)
 OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 GROQ_API_KEY=gsk_...
 
-# Voice
+# Voice (optional)
 ELEVENLABS_API_KEY=...
 DEEPGRAM_API_KEY=...
 
-# Database
-DATABASE_URL=postgresql://localhost/ai_agents
-
-# Vector DB
-PGVECTOR_URL=postgresql://localhost/pgvector
-
-# Redis (for BullMQ)
+# Data stores (defaults match docker-compose)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/ai_agents
 REDIS_URL=redis://localhost:6379
 
-# Optional: Datadog
-DATADOG_API_KEY=...
+# Web search tool (optional)
+SERPAPI_KEY=
+
+# Defaults
+DEFAULT_LLM_PROVIDER=openai
+DEFAULT_LLM_MODEL=gpt-4o-mini
+FALLBACK_LLM_PROVIDER=anthropic
+FALLBACK_LLM_MODEL=claude-3-5-haiku-latest
+
+# Optional production tuning
+LLM_CACHE_ENABLED=true
+LLM_CACHE_TTL_SECONDS=3600
 ```
 
-### Switch LLM Providers
+**Headers (direct API clients):**
 
-```typescript
-// Just update config
-const response = await this.llmService.chat({
-  provider: 'anthropic',  // Switch from OpenAI to Claude
-  model: 'claude-3-opus',
-  messages: [...]
-});
-```
+- `X-User-Id` — rate-limit key (falls back to `userId` in body or IP)
+- `X-Token-Budget` — optional max tokens per user (enforced server-side when wired)
 
-## Testing
-
-```bash
-# Run tests
-npm test
-
-# E2E tests
-npm run test:e2e
-
-# Examples:
-# - Chat flow with memory
-# - RAG retrieval
-# - Tool calling
-# - Multi-agent coordination
-```
+---
 
 ## Production (implemented vs roadmap)
 
 | Feature | Status |
 |---------|--------|
-| Per-user rate limiting (`UserThrottlerGuard`, `X-User-Id`) | Implemented |
-| LLM response cache (Redis + Postgres `llm_response_cache`) | Implemented |
-| HTTP request logging (`LoggingInterceptor`) | Implemented |
-| Token usage tracking (`user_token_usage`, `GET /api/usage`) | Implemented |
-| Embedding dedup on ingest (`contentHash` in metadata) | Implemented |
-| Fallback LLM provider + retries | Implemented |
-| Auto memory summarize (≥6 user messages → BullMQ) | Implemented |
+| Per-user rate limiting | Implemented |
+| LLM response cache (Redis + `llm_response_cache`) | Implemented |
+| HTTP logging interceptor | Implemented |
+| Token usage (`user_token_usage`, `GET /api/usage`) | Implemented |
+| Embedding dedup on ingest | Implemented |
+| LLM fallback provider + retries | Implemented |
+| Auto memory summarize (≥6 user messages) | Implemented |
+| Support escalation flag in chat | Implemented |
+| Domain JSON-style replies (prompt suffix) | Implemented |
 | Datadog SDK | Roadmap |
-| Encryption at-rest for user data | Roadmap |
-| Streaming TTS (`Accept: audio/stream`) | Roadmap (batch TTS works) |
+| Encryption at-rest | Roadmap |
+| Streaming TTS | Roadmap (batch TTS works) |
+
+---
+
+## Testing
+
+```bash
+npm test              # unit: llm, rag, agents, clones, tools, chat e2e
+npm run test:e2e      # API smoke (chat.e2e.test.ts)
+```
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `EADDRINUSE :3001` | Stop old API process or change `PORT` |
+| DB connection refused | `docker compose up -d`; use port **5433** in `DATABASE_URL` |
+| Embeddings fail | Set `OPENAI_API_KEY` (embeddings use OpenAI) |
+| Clone tables missing | `npm run migration:run` |
+| Web API errors | Ensure API on `:3001`; leave `apiBaseUrl` empty in Settings for proxy |
+| Redis errors for queue | Start Redis via docker-compose; sync chat still works |
+
+---
 
 ## Next Steps
 
-1. **Understand architecture:** Read examples/
-2. **Set up locally:** docker-compose + npm install
-3. **Try examples:** npm run example:*
-4. **Build your agent:** Copy a base agent, customize
+1. Run **docker compose** + **migrations** + add API keys
+2. Open **http://localhost:3000/clones** and build a persona
+3. Chat with `clone-{id}` or customize agents via `/agents`
+4. Explore `examples/` and extend `src/agents/`
 
 ## License
 
 MIT
-
----
-
-**AI agents for startups. Multi-model. Production-ready. No hallucinations about your capabilities.**
